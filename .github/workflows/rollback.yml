@@ -12,10 +12,17 @@ on:
         required: true
         type: string
 
+# Minimal default permissions
+permissions:
+  contents: read
+
 jobs:
   rollback:
     name: Execute Rollback
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     environment:
       name: production
 

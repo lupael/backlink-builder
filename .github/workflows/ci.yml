@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Minimal default permissions; individual jobs can escalate as needed.
+permissions:
+  contents: read
+
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"
@@ -17,6 +21,8 @@ jobs:
   backend-ci:
     name: Backend — Test & Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: backend
@@ -49,6 +55,8 @@ jobs:
   frontend-ci:
     name: Frontend — Build & Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: frontend
@@ -85,6 +93,8 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -113,6 +123,8 @@ jobs:
     name: Deploy — Staging
     needs: [backend-ci, frontend-ci]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
     environment:
       name: staging
@@ -141,6 +153,10 @@ jobs:
     name: Deploy — Production
     needs: [backend-ci, frontend-ci, security-audit]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+      issues: write
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment:
       name: production
