@@ -43,7 +43,11 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+CORS(
+    app,
+    resources={r"/api/*": {"origins": os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")}},
+    supports_credentials=True,
+)
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
@@ -183,8 +187,9 @@ def register():
     if User.query.filter_by(email=data["email"]).first():
         return jsonify({"error": "Email already registered"}), 409
 
-    # First user is admin
-    role = "admin" if User.query.count() == 0 else data.get("role", "viewer")
+    # First user is admin; all subsequent self-registrations are viewer.
+    # Ignore any client-provided role here to prevent privilege escalation.
+    role = "admin" if User.query.count() == 0 else "viewer"
     user = User(email=data["email"], name=data["name"], role=role)
     user.set_password(data["password"])
     db.session.add(user)
@@ -264,6 +269,9 @@ def update_user(user_id):
     user = User.query.get_or_404(user_id)
     data = request.get_json() or {}
     if "role" in data:
+        allowed_roles = {"admin", "manager", "viewer"}
+        if data["role"] not in allowed_roles:
+            return jsonify({"error": "Invalid role"}), 400
         user.role = data["role"]
     if "is_active" in data:
         user.is_active = data["is_active"]
@@ -498,20 +506,26 @@ def dashboard():
     )
     avg_da = round(float(avg_da_row), 1) if avg_da_row else 0
 
-    # Submissions per day (last 14 days) - use strftime for SQLite compat
-    from sqlalchemy import func as _func, text as _text
+    # Submissions per day (last 14 days) - func.date() works on both SQLite and PostgreSQL
     fourteen_days_ago = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(days=14)
+    day_expr = func.date(BacklinkSubmission.created_at)
     daily_rows = (
         db.session.query(
-            func.strftime("%Y-%m-%d", BacklinkSubmission.created_at).label("day"),
+            day_expr.label("day"),
             func.count(BacklinkSubmission.id).label("count"),
         )
         .filter(BacklinkSubmission.created_at >= fourteen_days_ago)
-        .group_by(func.strftime("%Y-%m-%d", BacklinkSubmission.created_at))
-        .order_by(func.strftime("%Y-%m-%d", BacklinkSubmission.created_at))
+        .group_by(day_expr)
+        .order_by(day_expr)
         .all()
     )
-    daily_data = [{"date": row.day, "count": row.count} for row in daily_rows]
+    daily_data = [
+        {
+            "date": row.day.isoformat() if hasattr(row.day, "isoformat") else str(row.day),
+            "count": row.count,
+        }
+        for row in daily_rows
+    ]
 
     # Category distribution
     cat_rows = (

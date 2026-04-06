@@ -63,6 +63,20 @@ def test_register_second_user_is_viewer(client):
     assert data["user"]["role"] == "viewer"
 
 
+def test_register_cannot_self_assign_admin_role(client):
+    """Verify that a non-first user cannot escalate to admin via the role field."""
+    _register_and_login(client)  # creates the first admin
+    res = client.post("/api/auth/register", json={
+        "email": "attacker@test.io",
+        "password": "AttackPass!1",
+        "name": "Attacker",
+        "role": "admin",          # should be ignored
+    })
+    assert res.status_code == 201
+    data = json.loads(res.data)
+    assert data["user"]["role"] == "viewer"
+
+
 def test_login_invalid_credentials(client):
     _register_and_login(client)
     res = client.post("/api/auth/login", json={
@@ -299,3 +313,17 @@ def test_viewer_cannot_list_users(client):
     viewer_token = json.loads(res.data)["access_token"]
     res = client.get("/api/users", headers=_auth_headers(viewer_token))
     assert res.status_code == 403
+
+
+def test_update_user_invalid_role_rejected(client):
+    """Admin cannot assign an arbitrary/invalid role."""
+    admin_token, _ = _register_and_login(client)
+    res = client.post("/api/auth/register", json={
+        "email": "u2@test.io", "password": "UserPass!1", "name": "U2",
+    })
+    u2_id = json.loads(res.data)["user"]["id"]
+    res = client.patch(f"/api/users/{u2_id}", json={"role": "superuser"},
+                       headers=_auth_headers(admin_token))
+    assert res.status_code == 400
+    data = json.loads(res.data)
+    assert "Invalid role" in data["error"]

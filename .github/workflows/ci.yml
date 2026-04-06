@@ -40,7 +40,12 @@ jobs:
         run: pip install -r requirements.txt pytest pytest-cov
 
       - name: Run backend tests
-        run: pytest tests/ -v --cov=app --cov-report=xml || echo "No tests found – skipping"
+        run: |
+          if [ -d tests ]; then
+            pytest tests/ -v --cov=app --cov-report=xml
+          else
+            echo "No tests found – skipping"
+          fi
 
       - name: Upload coverage
         if: always()
@@ -75,7 +80,7 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: npm run lint -- --max-warnings 0 || echo "Lint warnings present"
+        run: npm run lint -- --max-warnings 0
 
       - name: Build production bundle
         run: npm run build
@@ -181,10 +186,20 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'production',
+              description: 'Production deployment',
+              production_environment: true,
+              auto_merge: false,
+              required_contexts: [],
+            });
             await github.rest.repos.createDeploymentStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              deployment_id: context.payload.deployment?.id || 0,
+              deployment_id: deployment.data.id,
               state: 'success',
               description: 'Production deployment complete',
             });

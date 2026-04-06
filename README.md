@@ -24,7 +24,7 @@
 | 📋 Submissions | Paginated table with status management and retry support |
 | 🗂️ Directories | Catalogue of 20+ pre-seeded open-source directories with DA/spam filtering |
 | 📈 Reports | Export CSV or JSON reports for SEO audits and client deliverables |
-| �� User Management | Admin panel for enabling/disabling users and assigning roles |
+| 👥 User Management | Admin panel for enabling/disabling users and assigning roles |
 | 🔄 CI/CD | GitHub Actions pipeline with test, lint, build, deploy, and rollback workflows |
 
 ---
