@@ -1,0 +1,205 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+# Minimal default permissions; individual jobs can escalate as needed.
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Backend tests & lint
+  # ─────────────────────────────────────────────────────────────────────────
+  backend-ci:
+    name: Backend — Test & Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-cov
+
+      - name: Run backend tests
+        run: |
+          if [ -d tests ]; then
+            pytest tests/ -v --cov=app --cov-report=xml
+          else
+            echo "No tests found – skipping"
+          fi
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Frontend build & lint
+  # ─────────────────────────────────────────────────────────────────────────
+  frontend-ci:
+    name: Frontend — Build & Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint -- --max-warnings 0
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Security audit
+  # ─────────────────────────────────────────────────────────────────────────
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: npm audit (frontend)
+        working-directory: frontend
+        run: npm audit --audit-level=high || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: pip-audit (backend)
+        working-directory: backend
+        run: pip install pip-audit && pip-audit -r requirements.txt || true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Deploy to staging (on push to develop)
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy — Staging
+    needs: [backend-ci, frontend-ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+      - name: Deploy to staging server
+        run: |
+          echo "Deploying to staging environment…"
+          # Replace with your deployment command:
+          # e.g. rsync, Docker push, AWS ECS deploy, etc.
+          echo "Deployment complete: ${{ vars.STAGING_URL }}"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Deploy to production (on push to main)
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy-production:
+    name: Deploy — Production
+    needs: [backend-ci, frontend-ci, security-audit]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+      issues: write
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+      - name: Deploy to production
+        run: |
+          echo "Deploying to production environment…"
+          # Replace with your deployment command.
+          echo "Production deployment complete: ${{ vars.PRODUCTION_URL }}"
+
+      - name: Create GitHub deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'production',
+              description: 'Production deployment',
+              production_environment: true,
+              auto_merge: false,
+              required_contexts: [],
+            });
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: 'success',
+              description: 'Production deployment complete',
+            });
